@@ -29,7 +29,7 @@ app <- oauth_app("shinysynapse",
   redirect_uri = APP_URL
 )
 
-# Here I'm using a canned endpoint, but you can create with oauth_endpoint()
+# These are the user info details ('claims') requested from Synapse:
 claims=list(
 	family_name=NULL, 
 	given_name=NULL,
@@ -52,6 +52,7 @@ claims=list(
 claimsParam=toJSON(list(id_token=claims,userinfo=claims))
 api <- oauth_endpoint(authorize=paste0("https://signin.synapse.org?claims=", claimsParam), access="https://repo-prod.prod.sagebase.org/auth/v1/oauth2/token")
 
+# The 'openid' scope is required by the protocol for retrieving user information.
 scope <- "openid"
 
 # Shiny -------------------------------------------------------------------
@@ -90,11 +91,10 @@ server <- function(input, output, session) {
     return()
   }
   
-  url_encoded_redirect_uri <- "http%3A%2F%2F127.0.0.1%3A8100" # encoded redirect_uri
-  url<-paste0(api$access, '?', 'redirect_uri=', url_encoded_redirect_uri, '&grant_type=', 'authorization_code' ,'&code=',params$code)
-  
 
+  url<-paste0(api$access, '?', 'redirect_uri=', APP_URL, '&grant_type=', 'authorization_code' ,'&code=',params$code)
   
+  # get the access_token and userinfo token
   req <- POST(url,
       encode = "form",
       body = '',
@@ -102,7 +102,6 @@ server <- function(input, output, session) {
       config = list()
   )
  
-
   stop_for_status(req, task = "get an access token")
   token_response <-content(req, type = NULL)
   
@@ -110,7 +109,7 @@ server <- function(input, output, session) {
   access_token<-token_response$access_token
   id_token<-token_response$id_token
  
-
+  # now get some actual data
   resp <- GET("https://repo-prod.prod.sagebase.org/auth/v1/oauth2/userinfo", add_headers(Authorization=paste0("Bearer ", access_token)))
   # TODO: check for success/failure here
 
