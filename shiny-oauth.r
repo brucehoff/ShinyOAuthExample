@@ -9,11 +9,6 @@ library(rjson)
 
 # OAuth setup --------------------------------------------------------
 
-# Most OAuth applications require that you redirect to a fixed and known
-# set of URLs. Many only allow you to redirect to a single URL: if this
-# is the case for, you'll need to create an app for testing with a localhost
-# url, and an app for your deployed app.
-
 if (interactive()) {
   # testing url
   options(shiny.port = 8100)
@@ -23,9 +18,26 @@ if (interactive()) {
   APP_URL <- "https://servername/path-to-app"
 }
 
+trimWhitespace<-function(x) {
+  sub("^[[:space:]]*(.*?)[[:space:]]*$", "\\1", x, perl=TRUE)
+}
+config<-readLines("config")
+client_id<-NULL
+client_secret<-NULL
+for (row in config) {
+	if (startsWith(row, 'client_id:')) {
+		client_id<-trimWhitespace(substring(row, nchar('client_id:')+1))
+	}
+	if (startsWith(row, 'client_secret:')) {
+		client_secret<-trimWhitespace(substring(row, nchar('client_secret:')+1))
+	}
+}
+if (is.null(client_id)) stop("config file is missing client_id")
+if (is.null(client_secret)) stop("config file is missing client_secret")
+
 app <- oauth_app("shinysynapse",
-  key = "",
-  secret = "", 
+  key = client_id,
+  secret = client_secret, 
   redirect_uri = APP_URL
 )
 
@@ -49,7 +61,7 @@ claims=list(
 	company=NULL
 )
 
-claimsParam=toJSON(list(id_token=claims,userinfo=claims))
+claimsParam<-toJSON(list(id_token=claims,userinfo=claims))
 api <- oauth_endpoint(authorize=paste0("https://signin.synapse.org?claims=", claimsParam), access="https://repo-prod.prod.sagebase.org/auth/v1/oauth2/token")
 
 # The 'openid' scope is required by the protocol for retrieving user information.
@@ -59,39 +71,46 @@ scope <- "openid"
 
 has_auth_code <- function(params) {
   # params is a list object containing the parsed URL parameters. Return TRUE if
-  # based on these parameters, it looks like auth codes are present that we can
+  # based on these parameters, it looks like auth code is present that we can
   # use to get an access token. If not, it means we need to go through the OAuth
   # flow.
   return(!is.null(params$code))
 }
 
-ui <- fluidPage(
+userInfoDisplay <- fluidPage(
   # Your regular UI goes here, for when everything is properly auth'd
-  verbatimTextOutput("code")
+  verbatimTextOutput("userInfo")
 )
 
-# A little-known feature of Shiny is that the UI can be a function, not just
-# objects. You can use this to dynamically render the UI based on the request.
-# We're going to pass this uiFunc, not ui, to shinyApp(). If you're using
-# ui.R/server.R style files, that's fine too--just make this function the last
-# expression in your ui.R file.
+
+# https://stackoverflow.com/questions/57755830/how-to-redirect-to-a-dynamic-url-in-shiny
+jscode <- "Shiny.addCustomMessageHandler('mymessage', function(message) { window.location = message;});"
+
 uiFunc <- function(req) {
   if (!has_auth_code(parseQueryString(req$QUERY_STRING))) {
-    url <- oauth2.0_authorize_url(api, app, scope = scope)
-    redirect <- sprintf("location.replace(\"%s\");", url)
-    tags$script(HTML(redirect))
+  	# login in button
+  	fluidPage(
+  		tags$head(tags$script(jscode)),
+  		titlePanel("Synapse OAuth Demo"),
+  		actionButton("action", "Log in to Synapse")
+  	)
   } else {
-    ui
+    userInfoDisplay
   }
 }
 
 server <- function(input, output, session) {
+  # clicking on the 'Log in' button will kick off the OAuth round trip
+  observeEvent(input$action, {
+  	session$sendCustomMessage("mymessage", oauth2.0_authorize_url(api, app, scope = scope))
+  	return()
+  })
+  
   params <- parseQueryString(isolate(session$clientData$url_search))
   if (!has_auth_code(params)) {
     return()
   }
   
-
   url<-paste0(api$access, '?', 'redirect_uri=', APP_URL, '&grant_type=', 'authorization_code' ,'&code=',params$code)
   
   # get the access_token and userinfo token
@@ -111,11 +130,10 @@ server <- function(input, output, session) {
  
   # now get some actual data
   resp <- GET("https://repo-prod.prod.sagebase.org/auth/v1/oauth2/userinfo", add_headers(Authorization=paste0("Bearer ", access_token)))
-  # TODO: check for success/failure here
 
   x<-fromJSON(content(resp, "text"))
   formatted<-paste(lapply(names(x), function(n) paste(n, x[n])), collapse="\n")
-  output$code <- renderText(formatted)
+  output$userInfo <- renderText(formatted)
 }
 
 # Note that we're using uiFunc, not ui!

@@ -14,5 +14,12 @@ client_id_and_secret<-synRestPOST(paste0('/oauth2/client/secret/',client$client_
 
 ```
 
-Now fill in `key` and `secret` in the call to `oauth_app()` (appx. ll. 27-28) with the values from `client_id_and_secret`, then run `shiny-oauth-r`.
+Now create a text file called `config` in this format:
+
+```
+client_id: xxxxx
+client_secret: xxxxx
+```
+
+Finally, run `shiny-oauth-r`.
 
